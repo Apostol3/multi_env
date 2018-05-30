@@ -188,6 +188,9 @@ void multi_env::work() {
 
 	bool all_go = false;
 
+	n_send_info nsi_e;
+	nsi_e.head = verification_header::ok;
+
 	while (true) {
 		e_send_info esi_n;
 		esi_n.head = verification_header::ok;
@@ -223,7 +226,10 @@ void multi_env::work() {
 				return;
 			}
 
-			esi_n.data.insert(esi_n.data.end(), esi.data.begin(), esi.data.end());
+			for (auto& task : esi.data) {
+				esi_n.data.emplace_back();
+				esi_n.data.back().swap(task);
+			}
 		}
 
 		all_go = std::all_of(envs_.begin(), envs_.end(), 
@@ -265,20 +271,23 @@ void multi_env::work() {
 			return;
 		}
 
-		n_send_info nsi_e;
-		nsi_e.head = verification_header::ok;
+		auto nsi_current = nsi.data.begin();
 		for (auto& env : envs_)
 		{
 			size_t count = env->get_state().count;
 			if (env->get_header() != verification_header::ok && !all_go) {
-				nsi.data.erase(nsi.data.begin(), nsi.data.begin() + count);
+				nsi_current += count;
 				continue;
 			}
 
-			nsi_e.data.clear();
-			nsi_e.data.insert(nsi_e.data.begin(), nsi.data.begin(), nsi.data.begin() + count);
-			nsi.data.erase(nsi.data.begin(), nsi.data.begin() + count);
+			nsi_e.data.resize(count);
 
+			for (size_t i = 0; i < count; ++i)
+			{
+				nsi_e.data[i].swap(*(nsi_current+i));
+			}
+
+			nsi_current += count;
 			env->set(nsi_e);
 		}
 

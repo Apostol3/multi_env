@@ -36,10 +36,16 @@ enum class packet_type
 
 class remote_env : public base_env
 {
-	std::unique_ptr<base_stream> _pipe;
-	verification_header _lasthead;
-	env_state _state;
-	e_restart_info _lrinfo;
+	std::unique_ptr<base_stream> pipe_;
+	verification_header lasthead_;
+	env_state state_;
+	e_restart_info lrinfo_;
+
+	static const size_t dom_default_sz_ = 64 * 1024u;
+	static const size_t stack_default_sz_ = 4 * 1024u;
+
+	std::vector<char> dom_buffer_;
+	std::vector<char> stack_buffer_;
 
 public:
 
@@ -60,21 +66,21 @@ public:
 
 	verification_header get_header() const override
 	{
-		return _lasthead;
+		return lasthead_;
 	}
 
 	e_restart_info get_restart_info() const override
 	{
-		return _lrinfo;
+		return lrinfo_;
 	}
 
 	env_state get_state() const override
 	{
-		return _state;
+		return state_;
 	}
 
 	explicit remote_env(std::unique_ptr<base_stream>&& a) :
-		_pipe(std::move(a)), _lasthead(), _state(), _lrinfo()
+		pipe_(std::move(a)), lasthead_(), state_(), lrinfo_()
 	{
 	}
 

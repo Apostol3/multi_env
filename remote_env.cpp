@@ -8,13 +8,15 @@ using namespace rapidjson;
 
 int remote_env::init()
 {
-	_pipe->create();
+	dom_buffer_.resize(dom_default_sz_ / sizeof(char));
+	stack_buffer_.resize(stack_default_sz_ / sizeof(char));
+	pipe_->create();
 	return 0;
 }
 
 int remote_env::wait()
 {
-	_pipe->wait();
+	pipe_->wait();
 	return 0;
 }
 
@@ -26,7 +28,7 @@ e_start_info remote_env::get_start_info()
 	packet_type ptype;
 	while (sz == 0)
 	{
-		_pipe->receive(&buf, sz);
+		pipe_->receive(&buf, sz);
 	}
 
 	Document doc;
@@ -59,27 +61,27 @@ e_start_info remote_env::get_start_info()
 	esi.incount = desi["incount"].GetUint64();
 	esi.outcount = desi["outcount"].GetUint64();
 
-	_state.mode = esi.mode;
-	_state.count = esi.count;
-	_state.incount = esi.incount;
-	_state.outcount = esi.outcount;
+	state_.mode = esi.mode;
+	state_.count = esi.count;
+	state_.incount = esi.incount;
+	state_.outcount = esi.outcount;
 	return esi;
 }
 
 int remote_env::set_start_info(const n_start_info& inf)
 {
-	if (_state.mode == send_modes::specified && inf.count != _state.count)
+	if (state_.mode == send_modes::specified && inf.count != state_.count)
 	{
 		throw;
 	}
 
-	if (_state.mode == send_modes::undefined && _state.count != 0 && inf.count > _state.count)
+	if (state_.mode == send_modes::undefined && state_.count != 0 && inf.count > state_.count)
 	{
 		throw;
 	}
 
-	_state.count = inf.count;
-	_state.round_seed = inf.round_seed;
+	state_.count = inf.count;
+	state_.round_seed = inf.round_seed;
 
 	StringBuffer s;
 	Writer< StringBuffer > doc(s);
@@ -97,7 +99,7 @@ int remote_env::set_start_info(const n_start_info& inf)
 	doc.EndObject();
 	s.Put('\0');
 
-	_pipe->send(s.GetString(), s.GetSize());
+	pipe_->send(s.GetString(), s.GetSize());
 	return 0;
 }
 
@@ -109,10 +111,15 @@ e_send_info remote_env::get()
 
 	while (sz == 0)
 	{
-		_pipe->receive(&buf, sz);
+		pipe_->receive(&buf, sz);
 	}
 
-	Document doc;
+	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() * sizeof(char) };
+	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(),
+		stack_buffer_.size() * sizeof(char) };
+
+	GenericDocument<UTF8<>, MemoryPoolAllocator<>, MemoryPoolAllocator<>>
+		doc(&dom_allocator, stack_allocator.Capacity(), &stack_allocator);
 
 	doc.Parse(static_cast< char* >(buf));
 	if (doc.HasParseError())
@@ -131,18 +138,18 @@ e_send_info remote_env::get()
 	e_send_info esi;
 	auto& desi = doc["e_send_info"];
 	esi.head = verification_header(desi["head"].GetInt());
-	_lasthead = esi.head;
+	lasthead_ = esi.head;
 
 	if (esi.head != verification_header::ok)
 	{
 		if (esi.head == verification_header::restart)
 		{
 			auto& data = desi["score"];
-			_lrinfo.result.clear();
-			_lrinfo.result.reserve(data.Size());
+			lrinfo_.result.clear();
+			lrinfo_.result.reserve(data.Size());
 			for (auto i = data.Begin(); i != data.End(); i++)
 			{
-				_lrinfo.result.push_back(i->GetDouble());
+				lrinfo_.result.push_back(i->GetDouble());
 			}
 		}
 
@@ -164,13 +171,27 @@ e_send_info remote_env::get()
 		}
 	}
 
+	if (dom_allocator.Size() >dom_buffer_.size() * sizeof(char)) {
+		dom_buffer_.resize(dom_allocator.Size() / sizeof(char));
+	}
+
+	if (stack_allocator.Size() > stack_buffer_.size() * sizeof(char))
+	{
+		stack_buffer_.resize(stack_allocator.Size() / sizeof(char));
+	}
+
 	return esi;
 }
 
 int remote_env::set(const n_send_info& inf)
 {
-	StringBuffer s;
-	Writer< StringBuffer > doc(s);
+	using StringBufferType = GenericStringBuffer<UTF8<>, MemoryPoolAllocator<>>;
+	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() * sizeof(char) };
+	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(),
+		stack_buffer_.size() * sizeof(char) };
+
+	StringBufferType s{ &dom_allocator, dom_allocator.Capacity() };
+	Writer< StringBufferType, UTF8<>, UTF8<>, MemoryPoolAllocator<> > doc(s, &stack_allocator);
 	doc.StartObject();
 	doc.String("type");
 	doc.Int(static_cast<int>(packet_type::n_send_info));
@@ -201,15 +222,20 @@ int remote_env::set(const n_send_info& inf)
 	doc.EndObject();
 	s.Put('\0');
 
-	_pipe->send(s.GetString(), s.GetSize());
+	pipe_->send(s.GetString(), s.GetSize());
+
+	if (dom_allocator.Size() >dom_buffer_.size() * sizeof(char))
+	{
+		dom_buffer_.resize(dom_allocator.Size() / sizeof(char));
+	}
 
 	return 0;
 }
 
 int remote_env::restart(const n_restart_info& inf)
 {
-	_state.count = inf.count;
-	_state.round_seed = inf.round_seed;
+	state_.count = inf.count;
+	state_.round_seed = inf.round_seed;
 
 	StringBuffer s;
 	Writer< StringBuffer > doc(s);
@@ -228,7 +254,7 @@ int remote_env::restart(const n_restart_info& inf)
 	doc.EndObject();
 	s.Put('\0');
 
-	_pipe->send(s.GetString(), s.GetSize());
+	pipe_->send(s.GetString(), s.GetSize());
 
 	return 0;
 }
@@ -248,13 +274,21 @@ int remote_env::stop()
 	doc.EndObject();
 	s.Put('\0');
 
-	_pipe->send(s.GetString(), s.GetSize());
-	_pipe->close();
+	pipe_->send(s.GetString(), s.GetSize());
+
+	terminate();
 	return 0;
 };
 
 int remote_env::terminate()
 {
-	_pipe->close();
+	pipe_->close();
+
+	dom_buffer_.resize(dom_default_sz_ / sizeof(char));
+	dom_buffer_.shrink_to_fit();
+
+	stack_buffer_.resize(stack_default_sz_ / sizeof(char));
+	stack_buffer_.shrink_to_fit();
+
 	return 0;
 }

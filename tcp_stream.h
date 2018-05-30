@@ -11,14 +11,14 @@ using asio::ip::tcp;
 
 class tcp_stream : public base_stream
 {
-	asio::io_service _io_service;
-	tcp::socket _sock;
-	tcp::acceptor _acceptor;
-	void* _buf;
-	size_t _buf_size;
-	bool _server;
-	std::string _host;
-	std::string _port;
+	asio::io_service io_service_;
+	tcp::socket sock_;
+	tcp::acceptor acceptor_;
+	void* buf_;
+	size_t buf_size_;
+	bool server_;
+	std::string host_;
+	std::string port_;
 	size_t static const max_internal_buffer = 16384;
 
 public:
@@ -40,15 +40,15 @@ public:
 };
 
 inline tcp_stream::tcp_stream(std::string host, std::string port, size_t buf_size)
-	: _sock(_io_service), _acceptor(_io_service), _buf_size(buf_size), _server(false),
-	_host(host), _port(port)
+	: sock_(io_service_), acceptor_(io_service_), buf_size_(buf_size), server_(false),
+	host_(host), port_(port)
 {
-	_buf = new char[buf_size];
+	buf_ = new char[buf_size];
 }
 
 inline tcp_stream::~tcp_stream()
 {
-	delete[] static_cast<char*>(_buf);
+	delete[] static_cast<char*>(buf_);
 }
 
 inline void tcp_stream::receive(void** ppd, size_t& sz)
@@ -57,7 +57,7 @@ inline void tcp_stream::receive(void** ppd, size_t& sz)
 	sz = 0;
 	size_t sz_part;
 
-	sz_part = _sock.read_some(asio::buffer(_buf, max_internal_buffer), ec);
+	sz_part = sock_.read_some(asio::buffer(buf_, max_internal_buffer), ec);
 
 	if (ec == asio::error::would_block)
 	{
@@ -70,15 +70,15 @@ inline void tcp_stream::receive(void** ppd, size_t& sz)
 
 	sz = sz_part;
 
-	if (static_cast<char*>(_buf)[sz_part - 1] != '\0')
+	if (static_cast<char*>(buf_)[sz_part - 1] != '\0')
 	{
-		auto part_start = static_cast< char* >(_buf);
+		auto part_start = static_cast< char* >(buf_);
 		try
 		{
 			do
 			{
 				part_start += sz_part;
-				sz_part = _sock.read_some(asio::buffer(part_start, max_internal_buffer), ec);
+				sz_part = sock_.read_some(asio::buffer(part_start, max_internal_buffer), ec);
 				if (ec == asio::error::would_block)
 				{
 					//TODO: add some sleep here
@@ -86,7 +86,7 @@ inline void tcp_stream::receive(void** ppd, size_t& sz)
 					continue;
 				}
 				sz += sz_part;
-				if (sz + max_internal_buffer > _buf_size)
+				if (sz + max_internal_buffer > buf_size_)
 					throw std::runtime_error("receive buffer overflow");
 			} while (static_cast<char*>(part_start)[sz_part - 1] != '\0');
 		}
@@ -97,43 +97,43 @@ inline void tcp_stream::receive(void** ppd, size_t& sz)
 
 	}
 
-	*ppd = _buf;
+	*ppd = buf_;
 }
 
 inline void tcp_stream::send(const void* pd, size_t sz)
 {
-	asio::write(_sock, asio::buffer(static_cast< const char* >(pd), sz));
+	asio::write(sock_, asio::buffer(static_cast< const char* >(pd), sz));
 }
 
 inline bool tcp_stream::is_connected() const
 {
-	return _sock.is_open();
+	return sock_.is_open();
 }
 
 inline void tcp_stream::connect()
 {
-	_server = false;
+	server_ = false;
 
-	_sock = tcp::socket(_io_service);
+	sock_ = tcp::socket(io_service_);
 
-	tcp::resolver resolver(_io_service);
-	tcp::resolver::query query(_host, _port);
+	tcp::resolver resolver(io_service_);
+	tcp::resolver::query query(host_, port_);
 	tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
 
-	asio::connect(_sock, endpoint_iterator);
+	asio::connect(sock_, endpoint_iterator);
 
 }
 
 inline void tcp_stream::create()
 {
-	if (_acceptor.is_open())
-		_acceptor.close();
+	if (acceptor_.is_open())
+		acceptor_.close();
 
 	int port_num;
 
 	try
 	{
-		port_num = std::stoi(_port.c_str());
+		port_num = std::stoi(port_.c_str());
 	}
 	catch (std::invalid_argument&)
 	{
@@ -143,22 +143,22 @@ inline void tcp_stream::create()
 	if (port_num < 0 || port_num > std::numeric_limits<unsigned short>::max())
 		throw std::invalid_argument("tcp error: invalid port");
 
-	_acceptor = tcp::acceptor(_io_service, tcp::endpoint(tcp::v4(),
+	acceptor_ = tcp::acceptor(io_service_, tcp::endpoint(tcp::v4(),
 		static_cast<unsigned short>(port_num)));
 
-	_acceptor.non_blocking(true);
-	_server = true;
+	acceptor_.non_blocking(true);
+	server_ = true;
 }
 
 inline void tcp_stream::wait() {
-	if (!_server)
+	if (!server_)
 		return;
 
 	asio::error_code ec;
-	_sock = tcp::socket(_io_service);
+	sock_ = tcp::socket(io_service_);
 	while (true)
 	{
-		_acceptor.accept(_sock, ec);
+		acceptor_.accept(sock_, ec);
 		if (ec == asio::error::would_block)
 		{
 			continue;
@@ -173,13 +173,13 @@ inline void tcp_stream::wait() {
 
 inline void tcp_stream::disconnect()
 {
-	_sock.close();
+	sock_.close();
 }
 
 inline void tcp_stream::close()
 {
-	if (_acceptor.is_open())
-		_acceptor.close();
-	_sock.close();
+	if (acceptor_.is_open())
+		acceptor_.close();
+	sock_.close();
 }
 

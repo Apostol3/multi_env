@@ -7,7 +7,10 @@ using namespace rapidjson;
 
 int nlab::connect()
 {
-	_pipe->connect();
+	dom_buffer_.resize(dom_default_sz_ / sizeof(char));
+	stack_buffer_.resize(stack_default_sz_ / sizeof(char));
+
+	pipe_->connect();
 	return 0;
 }
 
@@ -18,7 +21,7 @@ n_start_info nlab::get_start_info()
 
 	while (sz == 0)
 	{
-		_pipe->receive(&buf, sz);
+		pipe_->receive(&buf, sz);
 	}
 
 	Document doc;
@@ -42,18 +45,18 @@ n_start_info nlab::get_start_info()
 	nsi.count = desi["count"].GetUint64();
 	nsi.round_seed = desi["round_seed"].GetUint64();
 
-	_state.count = nsi.count;
-	_state.round_seed = nsi.round_seed;
+	state_.count = nsi.count;
+	state_.round_seed = nsi.round_seed;
 
 	return nsi;
 }
 
 int nlab::set_start_info(const e_start_info& inf) 
 {
-	_state.count = inf.count;
-	_state.mode = inf.mode;
-	_state.incount = inf.incount;
-	_state.outcount = inf.outcount;
+	state_.count = inf.count;
+	state_.mode = inf.mode;
+	state_.incount = inf.incount;
+	state_.outcount = inf.outcount;
 
 	StringBuffer s;
 	Writer< StringBuffer > doc(s);
@@ -77,7 +80,7 @@ int nlab::set_start_info(const e_start_info& inf)
 	doc.EndObject();
 	s.Put('\0');
 
-	_pipe->send(s.GetString(), s.GetSize());
+	pipe_->send(s.GetString(), s.GetSize());
 	return 0;
 }
 
@@ -89,10 +92,15 @@ n_send_info nlab::get()
 
 	while (sz == 0)
 	{
-		_pipe->receive(&buf, sz);
+		pipe_->receive(&buf, sz);
 	}
 
-	Document doc;
+	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() * sizeof(char) };
+	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(),
+		stack_buffer_.size() * sizeof(char) };
+
+	GenericDocument<UTF8<>, MemoryPoolAllocator<>, MemoryPoolAllocator<>>
+		doc(&dom_allocator, stack_allocator.Capacity(), &stack_allocator);
 
 	doc.Parse(static_cast< char* >(buf));
 	if (doc.HasParseError())
@@ -110,14 +118,14 @@ n_send_info nlab::get()
 	n_send_info nsi;
 	auto& dnsi = doc["n_send_info"];
 	nsi.head = verification_header(dnsi["head"].GetInt());
-	_lasthead = nsi.head;
+	lasthead_ = nsi.head;
 
 	if (nsi.head != verification_header::ok)
 	{
 		if (nsi.head == verification_header::restart)
 		{
-			_lrinfo.count = dnsi["count"].GetUint64();
-			_lrinfo.round_seed = dnsi["round_seed"].GetUint64();
+			lrinfo_.count = dnsi["count"].GetUint64();
+			lrinfo_.round_seed = dnsi["round_seed"].GetUint64();
 		}
 
 		return nsi;
@@ -137,13 +145,29 @@ n_send_info nlab::get()
 		}
 	}
 
+	if (dom_allocator.Size() >dom_buffer_.size() * sizeof(char))
+	{
+		dom_buffer_.resize(dom_allocator.Size() / sizeof(char));
+	}
+
+	if (stack_allocator.Size() > stack_buffer_.size() * sizeof(char))
+	{
+		stack_buffer_.resize(stack_allocator.Size() / sizeof(char));
+	}
+
 	return nsi;
 }
 
 int nlab::set(const e_send_info & inf)
 {
-	StringBuffer s;
-	Writer< StringBuffer > doc(s);
+	using StringBufferType = GenericStringBuffer<UTF8<>, MemoryPoolAllocator<>>;
+	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() * sizeof(char) };
+	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(),
+		stack_buffer_.size() * sizeof(char) };
+
+	StringBufferType s{ &dom_allocator, dom_allocator.Capacity() };
+	Writer< StringBufferType, UTF8<>, UTF8<>, MemoryPoolAllocator<> > doc(s, &stack_allocator);
+
 	doc.StartObject();
 	doc.String("type");
 	doc.Int(static_cast<int>(packet_type::e_send_info));
@@ -172,7 +196,12 @@ int nlab::set(const e_send_info & inf)
 	doc.EndObject();
 	s.Put('\0');
 
-	_pipe->send(s.GetString(), s.GetSize());
+	pipe_->send(s.GetString(), s.GetSize());
+
+	if (dom_allocator.Size() >dom_buffer_.size() * sizeof(char))
+	{
+		dom_buffer_.resize(dom_allocator.Size() / sizeof(char));
+	}
 
 	return 0;
 }
@@ -201,7 +230,7 @@ int nlab::restart(const e_restart_info & inf)
 	doc.EndObject();
 	s.Put('\0');
 
-	_pipe->send(s.GetString(), s.GetSize());
+	pipe_->send(s.GetString(), s.GetSize());
 
 	return 0;
 }
@@ -223,13 +252,20 @@ int nlab::stop()
 	doc.EndObject();
 	s.Put('\0');
 
-	_pipe->send(s.GetString(), s.GetSize());
-	_pipe->close();
+	pipe_->send(s.GetString(), s.GetSize());
+	disconnect();
 	return 0;
 }
 
 int nlab::disconnect()
 {
-	_pipe->disconnect();
+	pipe_->disconnect();
+
+	dom_buffer_.resize(dom_default_sz_ / sizeof(char));
+	dom_buffer_.shrink_to_fit();
+
+	stack_buffer_.resize(stack_default_sz_ / sizeof(char));
+	stack_buffer_.shrink_to_fit();
+
 	return 0;
 }

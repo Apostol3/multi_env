@@ -4,27 +4,33 @@
 #include "remote_env.h"
 
 class nlab {
-	std::unique_ptr<base_stream> _pipe;
-	verification_header _lasthead{};
-	env_state _state{};
-	n_restart_info _lrinfo{};
+	std::unique_ptr<base_stream> pipe_;
+	verification_header lasthead_{};
+	env_state state_{};
+	n_restart_info lrinfo_{};
+
+	static const size_t dom_default_sz_ = 64 * 1024u;
+	static const size_t stack_default_sz_ = 4 * 1024u;
+
+	std::vector<char> dom_buffer_;
+	std::vector<char> stack_buffer_;
 
 public:
 	static const unsigned VERSION = 0x00000100;
 	
 	verification_header get_header() const
 	{
-		return _lasthead;
+		return lasthead_;
 	}
 
 	n_restart_info get_restart_info() const
 	{
-		return _lrinfo;
+		return lrinfo_;
 	}
 
 	env_state get_state() const
 	{
-		return _state;
+		return state_;
 	}
 
 	int connect();
@@ -37,7 +43,7 @@ public:
 	int disconnect();
 
 	explicit nlab(std::unique_ptr<base_stream>&& a) :
-		_pipe(std::move(a))
+		pipe_(std::move(a))
 	{
 	}
 
