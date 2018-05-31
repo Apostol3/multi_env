@@ -3,6 +3,8 @@
 #include <iostream>
 #include <rapidjson/document.h>
 #include <rapidjson/writer.h>
+#include <rapidjson/reader.h>
+#include <rapidjson/error/en.h>
 
 using namespace rapidjson;
 
@@ -103,6 +105,202 @@ int remote_env::set_start_info(const n_start_info& inf)
 	return 0;
 }
 
+struct e_send_info_parser : public BaseReaderHandler<UTF8<>, e_send_info_parser>
+{
+	bool StartObject() { 
+		switch (state_)
+		{
+		case kExpectMainObjectStart:
+			state_ = kExpectMainNameOrEnd;
+			return true;
+		case kExpectPacketObjectStart:
+			state_ = kExpectPacketNameOrEnd;
+			return true;
+		default:
+			return false;
+		}
+	}
+    
+    bool EndObject(SizeType) {
+		switch (state_)
+		{
+		case kExpectMainNameOrEnd:
+			if (!got_type_ || !got_packet_ || !got_payload_ || !got_head_)
+			{
+				throw std::runtime_error("Get failed. Required JSON fields are missing");
+			}
+			return true;
+		case kExpectPacketNameOrEnd:
+			state_ = kExpectMainNameOrEnd;
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	bool Key(const Ch* str, SizeType len, bool copy) {
+		switch (state_)
+		{
+		case kExpectMainNameOrEnd:
+			if (!strncmp(str, "type", len)) {
+				got_type_ = true;
+				state_ = kExpectType;
+				return true;
+			}
+			else if (!strncmp(str, "e_send_info", len)) {
+				got_packet_ = true;
+				state_ = kExpectPacketObjectStart;
+				return true;
+			}
+			else {
+				return false;
+			}
+		case kExpectPacketNameOrEnd:
+			if (!strncmp(str, "head", len))
+			{
+				got_head_ = true;
+				state_ = kExpectHead;
+				return true;
+			}
+			else if (!strncmp(str, "data", len))
+			{
+				state_ = kExpectDataStart;
+				return true;
+			}
+			else if (!strncmp(str, "score", len))
+			{
+				state_ = kExpectScoreStart;
+				return true;
+			}
+			else
+			{
+				return false;
+			}
+		default:
+			return false;
+		}
+	}
+
+	bool StartArray() {
+		switch (state_)
+		{
+		case kExpectEnvDataStartOrEnd:
+			state_ = kExpectEnvDataOrEnd;
+			return true;
+		case kExpectDataStart:
+			got_payload_ = true;
+			new_data_.reserve(expected_inputs);
+			result->data.reserve(expected_envs);
+			state_ = kExpectEnvDataStartOrEnd;
+			return true;
+		case kExpectScoreStart:
+			lrinfo->result.clear();
+			lrinfo->result.reserve(expected_envs);
+			got_payload_ = true;
+			state_ = kExpectScoreOrEnd;
+			return true;
+		default:
+			return false;
+		}
+	}
+
+    bool EndArray(SizeType) {
+		switch (state_)
+		{
+		case kExpectEnvDataOrEnd:
+			result->data.push_back({});
+			result->data.back().swap(new_data_);
+			new_data_.reserve(expected_inputs);
+			state_ = kExpectEnvDataStartOrEnd;
+			return true;
+		case kExpectEnvDataStartOrEnd:
+			state_ = kExpectPacketNameOrEnd;
+			return true;
+		case kExpectScoreOrEnd:
+			state_ = kExpectPacketNameOrEnd;
+			return true;
+		default:
+			return false;
+		}
+	}
+
+
+	bool Double(double a) {
+		switch (state_)
+		{
+		case kExpectEnvDataOrEnd:
+			new_data_.emplace_back(a);
+			return true;
+		case kExpectScoreOrEnd:
+			lrinfo->result.emplace_back(a);
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	bool Int64(int64_t a)
+	{
+		switch (state_)
+		{
+		case kExpectType:
+			if (packet_type(a) != packet_type::e_send_info)
+			{
+				throw std::runtime_error("Get failed. Unknown packet type");
+			}
+			state_ = kExpectMainNameOrEnd;
+			return true;
+		case kExpectHead:
+			result->head = verification_header(a);
+			state_ = kExpectPacketNameOrEnd;
+			return true;
+		default:
+			return Double(static_cast<double>(a));
+		}
+	}
+
+	bool Null() { return Int64(0); }
+
+    bool Bool(bool a) { return Int64(a?1:0); }
+
+    bool Int(int a) { return Int64(a); }
+
+    bool Uint(unsigned a) { return Int64(a); }
+
+    bool Uint64(uint64_t a) { return Int64(static_cast<int64_t>(a)); }
+
+	bool Default() { return false; }
+
+	e_send_info* result{nullptr};
+	e_restart_info* lrinfo{nullptr};
+
+	size_t expected_envs{0};
+	size_t expected_inputs{0};
+
+private:
+	enum State
+	{
+		kExpectMainObjectStart,
+		kExpectMainNameOrEnd,
+		kExpectType,
+		kExpectPacketObjectStart,
+		kExpectPacketNameOrEnd,
+		kExpectHead,
+		kExpectDataStart,
+		kExpectEnvDataStartOrEnd,
+		kExpectEnvDataOrEnd,
+		kExpectScoreStart,
+		kExpectScoreOrEnd
+	}state_{kExpectMainObjectStart};
+
+	bool got_type_{ false };
+	bool got_packet_{ false };
+	bool got_payload_{ false };
+	bool got_head_{ false };
+
+	env_task new_data_;
+};
+
 e_send_info remote_env::get()
 {
 	void* buf = nullptr;
@@ -114,70 +312,37 @@ e_send_info remote_env::get()
 		pipe_->receive(&buf, sz);
 	}
 
-	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() * sizeof(char) };
+	e_send_info esi;
+
 	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(),
 		stack_buffer_.size() * sizeof(char) };
 
-	GenericDocument<UTF8<>, MemoryPoolAllocator<>, MemoryPoolAllocator<>>
-		doc(&dom_allocator, stack_allocator.Capacity(), &stack_allocator);
+	GenericReader<UTF8<>, UTF8<>, MemoryPoolAllocator<>> reader(&stack_allocator,
+		stack_buffer_.capacity());
+	StringStream ss(static_cast<char*>(buf));
 
-	doc.Parse(static_cast< char* >(buf));
-	if (doc.HasParseError())
+	e_send_info_parser handler;
+	handler.expected_envs = state_.count;
+	handler.expected_inputs = state_.incount;
+	handler.result = &esi;
+	handler.lrinfo = &lrinfo_;
+
+	reader.Parse(ss, handler);
+
+	if (reader.HasParseError())
 	{
 		std::cout << "Invalid JSON: " << static_cast< char* >(buf) << std::endl;
+		ParseErrorCode e = reader.GetParseErrorCode();
+		size_t o = reader.GetErrorOffset();
+		std::cout << "Error: " << GetParseError_En(e) << "\n";
+		std::cout << " at offset " << o << " near '" << std::string((char*)buf).substr(o, 10) << "...'\n";
 		throw std::runtime_error("Get failed. JSON parse error");
 	}
 
-
-	ptype = packet_type(doc["type"].GetInt());
-	if (ptype != packet_type::e_send_info)
-	{
-		throw std::runtime_error("Get failed. Unknown packet type");
-	}
-
-	e_send_info esi;
-	auto& desi = doc["e_send_info"];
-	esi.head = verification_header(desi["head"].GetInt());
 	lasthead_ = esi.head;
-
 	if (esi.head != verification_header::ok)
 	{
-		if (esi.head == verification_header::restart)
-		{
-			auto& data = desi["score"];
-			lrinfo_.result.clear();
-			lrinfo_.result.reserve(data.Size());
-			for (auto i = data.Begin(); i != data.End(); i++)
-			{
-				lrinfo_.result.push_back(i->GetDouble());
-			}
-		}
-
-		return esi;
-	}
-
-	auto& data = desi["data"];
-	esi.data.reserve(data.Size());
-
-	for (auto i = data.Begin(); i != data.End(); i++)
-	{
-		esi.data.emplace_back();
-
-		env_task& cur_tsk = esi.data.back();
-		cur_tsk.reserve(i->Size());
-		for (auto j = i->Begin(); j != i->End(); j++)
-		{
-			cur_tsk.push_back(j->GetDouble());
-		}
-	}
-
-	if (dom_allocator.Size() >dom_buffer_.size() * sizeof(char)) {
-		dom_buffer_.resize(dom_allocator.Size() / sizeof(char));
-	}
-
-	if (stack_allocator.Size() > stack_buffer_.size() * sizeof(char))
-	{
-		stack_buffer_.resize(stack_allocator.Size() / sizeof(char));
+		esi.data.clear();
 	}
 
 	return esi;
