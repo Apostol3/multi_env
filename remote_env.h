@@ -1,8 +1,9 @@
 #pragma once
 
-#include <vector>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "env.h"
 
@@ -44,8 +45,8 @@ class remote_env : public base_env
 	static const size_t dom_default_sz_ = 64 * 1024u;
 	static const size_t stack_default_sz_ = 4 * 1024u;
 
-	std::vector<char> dom_buffer_;
-	std::vector<char> stack_buffer_;
+	std::vector<std::uint8_t> dom_buffer_;
+	std::vector<std::uint8_t> stack_buffer_;
 
 public:
 

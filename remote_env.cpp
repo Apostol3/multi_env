@@ -10,8 +10,8 @@ using namespace rapidjson;
 
 int remote_env::init()
 {
-	dom_buffer_.resize(dom_default_sz_ / sizeof(char));
-	stack_buffer_.resize(stack_default_sz_ / sizeof(char));
+	dom_buffer_.resize(dom_default_sz_);
+	stack_buffer_.resize(stack_default_sz_);
 	pipe_->create();
 	return 0;
 }
@@ -24,18 +24,18 @@ int remote_env::wait()
 
 e_start_info remote_env::get_start_info()
 {
-	void* buf = nullptr;
+	char* buf = nullptr;
 	size_t sz = 0;
 
 	packet_type ptype;
 	while (sz == 0)
 	{
-		pipe_->receive(&buf, sz);
+		pipe_->receive(reinterpret_cast<void**>(&buf), sz);
 	}
 
 	Document doc;
 
-	doc.Parse(static_cast< char* >(buf));
+	doc.Parse(buf);
 	if (doc.HasParseError())
 	{
 		throw std::runtime_error("GetStartInfo failed. JSON parse error");
@@ -121,7 +121,7 @@ struct e_send_info_parser : public BaseReaderHandler<UTF8<>, e_send_info_parser>
 		}
 	}
     
-    bool EndObject(SizeType) {
+    bool EndObject( [[maybe_unused]] SizeType memberCount) {
 		switch (state_)
 		{
 		case kExpectMainNameOrEnd:
@@ -138,16 +138,17 @@ struct e_send_info_parser : public BaseReaderHandler<UTF8<>, e_send_info_parser>
 		}
 	}
 
-	bool Key(const Ch* str, SizeType len, bool copy) {
+	bool Key(const Ch* str, SizeType len, [[maybe_unused]] bool copy) {
+		(void)copy;
 		switch (state_)
 		{
 		case kExpectMainNameOrEnd:
-			if (!strncmp(str, "type", len)) {
+			if (strncmp(str, "type", len) == 0) {
 				got_type_ = true;
 				state_ = kExpectType;
 				return true;
 			}
-			else if (!strncmp(str, "e_send_info", len)) {
+			else if (strncmp(str, "e_send_info", len) == 0) {
 				got_packet_ = true;
 				state_ = kExpectPacketObjectStart;
 				return true;
@@ -156,18 +157,18 @@ struct e_send_info_parser : public BaseReaderHandler<UTF8<>, e_send_info_parser>
 				return false;
 			}
 		case kExpectPacketNameOrEnd:
-			if (!strncmp(str, "head", len))
+			if (strncmp(str, "head", len) == 0)
 			{
 				got_head_ = true;
 				state_ = kExpectHead;
 				return true;
 			}
-			else if (!strncmp(str, "data", len))
+			else if (strncmp(str, "data", len) == 0)
 			{
 				state_ = kExpectDataStart;
 				return true;
 			}
-			else if (!strncmp(str, "score", len))
+			else if (strncmp(str, "score", len) == 0)
 			{
 				state_ = kExpectScoreStart;
 				return true;
@@ -204,11 +205,11 @@ struct e_send_info_parser : public BaseReaderHandler<UTF8<>, e_send_info_parser>
 		}
 	}
 
-    bool EndArray(SizeType) {
+    bool EndArray( [[maybe_unused]] SizeType elementCount) {
 		switch (state_)
 		{
 		case kExpectEnvDataOrEnd:
-			result->data.push_back({});
+			result->data.emplace_back();
 			result->data.back().swap(new_data_);
 			new_data_.reserve(expected_inputs);
 			state_ = kExpectEnvDataStartOrEnd;
@@ -303,23 +304,21 @@ private:
 
 e_send_info remote_env::get()
 {
-	void* buf = nullptr;
+	char* buf = nullptr;
 	size_t sz = 0;
-	packet_type ptype;
 
 	while (sz == 0)
 	{
-		pipe_->receive(&buf, sz);
+		pipe_->receive(reinterpret_cast<void**>(&buf), sz);
 	}
 
 	e_send_info esi;
 
-	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(),
-		stack_buffer_.size() * sizeof(char) };
+	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(), stack_buffer_.size() };
 
 	GenericReader<UTF8<>, UTF8<>, MemoryPoolAllocator<>> reader(&stack_allocator,
 		stack_buffer_.capacity());
-	StringStream ss(static_cast<char*>(buf));
+	StringStream ss(buf);
 
 	e_send_info_parser handler;
 	handler.expected_envs = state_.count;
@@ -331,11 +330,11 @@ e_send_info remote_env::get()
 
 	if (reader.HasParseError())
 	{
-		std::cout << "Invalid JSON: " << static_cast< char* >(buf) << std::endl;
+		std::cout << "Invalid JSON: " << buf << std::endl;
 		ParseErrorCode e = reader.GetParseErrorCode();
 		size_t o = reader.GetErrorOffset();
 		std::cout << "Error: " << GetParseError_En(e) << "\n";
-		std::cout << " at offset " << o << " near '" << std::string((char*)buf).substr(o, 10) << "...'\n";
+		std::cout << " at offset " << o << " near '" << std::string(buf).substr(o, 10) << "...'\n";
 		throw std::runtime_error("Get failed. JSON parse error");
 	}
 
@@ -351,9 +350,8 @@ e_send_info remote_env::get()
 int remote_env::set(const n_send_info& inf)
 {
 	using StringBufferType = GenericStringBuffer<UTF8<>, MemoryPoolAllocator<>>;
-	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() * sizeof(char) };
-	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(),
-		stack_buffer_.size() * sizeof(char) };
+	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() };
+	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(), stack_buffer_.size() };
 
 	StringBufferType s{ &dom_allocator, dom_allocator.Capacity() };
 	Writer< StringBufferType, UTF8<>, UTF8<>, MemoryPoolAllocator<> > doc(s, &stack_allocator);
@@ -389,9 +387,9 @@ int remote_env::set(const n_send_info& inf)
 
 	pipe_->send(s.GetString(), s.GetSize());
 
-	if (dom_allocator.Size() >dom_buffer_.size() * sizeof(char))
+	if (dom_allocator.Size() > dom_buffer_.size())
 	{
-		dom_buffer_.resize(dom_allocator.Size() / sizeof(char));
+		dom_buffer_.resize(dom_allocator.Size());
 	}
 
 	return 0;
@@ -449,10 +447,10 @@ int remote_env::terminate()
 {
 	pipe_->close();
 
-	dom_buffer_.resize(dom_default_sz_ / sizeof(char));
+	dom_buffer_.resize(dom_default_sz_);
 	dom_buffer_.shrink_to_fit();
 
-	stack_buffer_.resize(stack_default_sz_ / sizeof(char));
+	stack_buffer_.resize(stack_default_sz_);
 	stack_buffer_.shrink_to_fit();
 
 	return 0;
