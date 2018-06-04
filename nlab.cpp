@@ -193,6 +193,11 @@ int nlab::set(const e_send_info & inf)
 		doc.StartArray();
 		for (auto& i : inf.data)
 		{
+			if (i.empty()) {
+				doc.Null();
+				continue;
+			}
+
 			doc.StartArray();
 			for (auto& j : i)
 			{

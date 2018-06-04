@@ -256,6 +256,9 @@ struct e_send_info_parser : public BaseReaderHandler<UTF8<>, e_send_info_parser>
 			result->head = verification_header(a);
 			state_ = kExpectPacketNameOrEnd;
 			return true;
+		case kExpectEnvDataStartOrEnd:
+			result->data.emplace_back();
+			return (a == 0);
 		default:
 			return Double(static_cast<double>(a));
 		}

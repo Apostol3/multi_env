@@ -230,14 +230,14 @@ void multi_env::work() {
 			auto& env = envs_[i];
 
 			if (env->get_header() != verification_header::ok && !all_go) {
-				esi_n.data.insert(esi_n.data.end(), env->get_state().count, env_task{ 0 });
+				esi_n.data.insert(esi_n.data.end(), env->get_state().count, env_task{ });
 				continue;
 			}
 
 			e_send_info esi = env->get();
 
 			if (esi.head == verification_header::restart) {
-				esi_n.data.insert(esi_n.data.end(), env->get_state().count, env_task{ 0 });
+				esi_n.data.insert(esi_n.data.end(), env->get_state().count, env_task{ });
 			} else if (esi.head != verification_header::ok) {
 				std::cout << "got " << static_cast<int>(esi.head) << " header from "
 					<< uris_[i] << ". stopping other enviroments and nlab\n";
