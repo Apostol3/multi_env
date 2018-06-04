@@ -12,6 +12,7 @@ int remote_env::init()
 {
 	dom_buffer_.resize(dom_default_sz_);
 	stack_buffer_.resize(stack_default_sz_);
+
 	pipe_->create();
 	return 0;
 }
@@ -304,6 +305,11 @@ private:
 
 e_send_info remote_env::get()
 {
+	if (last_stack_buffer_sz_ > stack_buffer_.size())
+	{
+		stack_buffer_.resize(last_stack_buffer_sz_);
+	}
+
 	char* buf = nullptr;
 	size_t sz = 0;
 
@@ -344,11 +350,23 @@ e_send_info remote_env::get()
 		esi.data.clear();
 	}
 
+	last_stack_buffer_sz_ = stack_allocator.Size();
+
 	return esi;
 }
 
 int remote_env::set(const n_send_info& inf)
 {
+	if (last_dom_buffer_sz_ > dom_buffer_.size())
+	{
+		dom_buffer_.resize(last_dom_buffer_sz_);
+	}
+
+	if (last_stack_buffer_sz_ > stack_buffer_.size())
+	{
+		stack_buffer_.resize(last_stack_buffer_sz_);
+	}
+
 	using StringBufferType = GenericStringBuffer<UTF8<>, MemoryPoolAllocator<>>;
 	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() };
 	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(), stack_buffer_.size() };
@@ -387,10 +405,8 @@ int remote_env::set(const n_send_info& inf)
 
 	pipe_->send(s.GetString(), s.GetSize());
 
-	if (dom_allocator.Size() > dom_buffer_.size())
-	{
-		dom_buffer_.resize(dom_allocator.Size());
-	}
+	last_dom_buffer_sz_ = dom_allocator.Size();
+	last_stack_buffer_sz_ = stack_allocator.Size();
 
 	return 0;
 }
@@ -449,9 +465,11 @@ int remote_env::terminate()
 
 	dom_buffer_.resize(dom_default_sz_);
 	dom_buffer_.shrink_to_fit();
+	last_dom_buffer_sz_ = 0;
 
 	stack_buffer_.resize(stack_default_sz_);
 	stack_buffer_.shrink_to_fit();
+	last_stack_buffer_sz_ = 0;
 
 	return 0;
 }

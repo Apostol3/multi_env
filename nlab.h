@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
+
 #include "remote_env.h"
 
 class nlab {
@@ -12,8 +14,11 @@ class nlab {
 	static const size_t dom_default_sz_ = 64 * 1024u;
 	static const size_t stack_default_sz_ = 4 * 1024u;
 
-	std::vector<char> dom_buffer_;
-	std::vector<char> stack_buffer_;
+	size_t last_dom_buffer_sz_{};
+	size_t last_stack_buffer_sz_{};
+
+	std::vector<std::uint8_t> dom_buffer_;
+	std::vector<std::uint8_t> stack_buffer_;
 
 public:
 	static const unsigned VERSION = 0x00000100;

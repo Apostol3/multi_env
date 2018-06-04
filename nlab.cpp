@@ -7,8 +7,8 @@ using namespace rapidjson;
 
 int nlab::connect()
 {
-	dom_buffer_.resize(dom_default_sz_ / sizeof(char));
-	stack_buffer_.resize(stack_default_sz_ / sizeof(char));
+	dom_buffer_.resize(dom_default_sz_);
+	stack_buffer_.resize(stack_default_sz_);
 
 	pipe_->connect();
 	return 0;
@@ -86,6 +86,16 @@ int nlab::set_start_info(const e_start_info& inf)
 
 n_send_info nlab::get()
 {
+	if (last_dom_buffer_sz_ > dom_buffer_.size())
+	{
+		dom_buffer_.resize(last_dom_buffer_sz_);
+	}
+
+	if (last_stack_buffer_sz_ > stack_buffer_.size())
+	{
+		stack_buffer_.resize(last_stack_buffer_sz_);
+	}
+
 	void* buf = nullptr;
 	size_t sz = 0;
 	
@@ -95,9 +105,8 @@ n_send_info nlab::get()
 		pipe_->receive(&buf, sz);
 	}
 
-	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() * sizeof(char) };
-	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(),
-		stack_buffer_.size() * sizeof(char) };
+	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() };
+	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(), stack_buffer_.size() };
 
 	GenericDocument<UTF8<>, MemoryPoolAllocator<>, MemoryPoolAllocator<>>
 		doc(&dom_allocator, stack_allocator.Capacity(), &stack_allocator);
@@ -145,25 +154,27 @@ n_send_info nlab::get()
 		}
 	}
 
-	if (dom_allocator.Size() >dom_buffer_.size() * sizeof(char))
-	{
-		dom_buffer_.resize(dom_allocator.Size() / sizeof(char));
-	}
-
-	if (stack_allocator.Size() > stack_buffer_.size() * sizeof(char))
-	{
-		stack_buffer_.resize(stack_allocator.Size() / sizeof(char));
-	}
+	last_dom_buffer_sz_ = dom_allocator.Size();
+	last_stack_buffer_sz_ = stack_allocator.Size();
 
 	return nsi;
 }
 
 int nlab::set(const e_send_info & inf)
 {
+	if (last_dom_buffer_sz_ > dom_buffer_.size())
+	{
+		dom_buffer_.resize(last_dom_buffer_sz_);
+	}
+
+	if (last_stack_buffer_sz_ > stack_buffer_.size())
+	{
+		stack_buffer_.resize(last_stack_buffer_sz_);
+	}
+
 	using StringBufferType = GenericStringBuffer<UTF8<>, MemoryPoolAllocator<>>;
-	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() * sizeof(char) };
-	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(),
-		stack_buffer_.size() * sizeof(char) };
+	MemoryPoolAllocator<> dom_allocator{ dom_buffer_.data(), dom_buffer_.size() };
+	MemoryPoolAllocator<> stack_allocator{ stack_buffer_.data(), stack_buffer_.size() };
 
 	StringBufferType s{ &dom_allocator, dom_allocator.Capacity() };
 	Writer< StringBufferType, UTF8<>, UTF8<>, MemoryPoolAllocator<> > doc(s, &stack_allocator);
@@ -198,10 +209,8 @@ int nlab::set(const e_send_info & inf)
 
 	pipe_->send(s.GetString(), s.GetSize());
 
-	if (dom_allocator.Size() >dom_buffer_.size() * sizeof(char))
-	{
-		dom_buffer_.resize(dom_allocator.Size() / sizeof(char));
-	}
+	last_dom_buffer_sz_ = dom_allocator.Size();
+	last_stack_buffer_sz_ = stack_allocator.Size();
 
 	return 0;
 }
@@ -261,11 +270,13 @@ int nlab::disconnect()
 {
 	pipe_->disconnect();
 
-	dom_buffer_.resize(dom_default_sz_ / sizeof(char));
+	dom_buffer_.resize(dom_default_sz_);
 	dom_buffer_.shrink_to_fit();
+	last_dom_buffer_sz_ = 0;
 
-	stack_buffer_.resize(stack_default_sz_ / sizeof(char));
+	stack_buffer_.resize(stack_default_sz_);
 	stack_buffer_.shrink_to_fit();
+	last_stack_buffer_sz_ = 0;
 
 	return 0;
 }
