@@ -1,3 +1,6 @@
 [submodule "CLI11"]
 	path = CLI11
 	url = https://github.com/CLIUtils/CLI11.git
+[submodule "tiny-process-library"]
+	path = tiny-process-library
+	url = https://github.com/eidheim/tiny-process-library.git

@@ -6,6 +6,8 @@
 #include <CLI/App.hpp>
 #include <CLI/Validators.hpp>
 
+#include "tiny-process-library/process.hpp"
+
 #include "nlab.h"
 #include "remote_env.h"
 #include "tcp_stream.h"
@@ -20,6 +22,8 @@ class multi_env {
 	std::unique_ptr<nlab> lab_{nullptr};
 	std::vector<std::unique_ptr<remote_env>> envs_;
 	std::vector<std::string> uris_;
+
+	std::vector<std::unique_ptr<TinyProcessLib::Process>> sub_procs;
 
 	void spawn_envs();
 
@@ -37,6 +41,14 @@ public:
 	void connect_nlab();
 	void connect_envs();
 	void work();
+	void cleanup();
+
+	~multi_env()
+	{
+		for (auto& process : sub_procs) {
+			process->kill();
+		}
+	}
 };
 
 void multi_env::init_nlab() {
@@ -178,8 +190,25 @@ void multi_env::connect_envs() {
 void multi_env::spawn_envs() {
 	for (auto i = 0; i < uris_.size(); i++)
 	{
-		std::string launch = std::string("start /B ") + command_ + std::string(" --uri ") + uris_[i];
-		system(launch.c_str());
+		std::string launch = command_ + std::string(" --uri ") + uris_[i];
+		sub_procs.emplace_back(std::make_unique<TinyProcessLib::Process>(launch));
+	}
+
+	std::string spawn_string = "all subs started. PID:  ";
+
+	for (auto& process : sub_procs) {
+		spawn_string += std::string("") + std::to_string(process->get_id()) + std::string(" ");
+	}
+
+	std::cout << spawn_string << "\n";
+
+}
+
+void multi_env::cleanup() {
+	for (auto& process : sub_procs)
+	{
+		process->close_stdin();
+		process->get_exit_status();
 	}
 }
 
@@ -334,6 +363,7 @@ int main(int argc, char** argv) {
 
 		menv.connect_envs();
 		menv.work();
+		menv.cleanup();
 	}
 	catch (std::exception& e) {
 		std::cerr << e.what();
