@@ -336,7 +336,7 @@ int main(int argc, char** argv) {
 	app.add_option("-I,--envs-uri",	envs_uri,
 		"enviroments URI in format 'tcp://hostname:port'", true);
 
-	app.add_option("-O,--nlab-uri",	envs_uri,
+	app.add_option("-O,--nlab-uri",	nlab_uri,
 		"nlab URI in format 'tcp://hostname:port'", true);
 
 	app.add_flag("-e,--existing", existing,
