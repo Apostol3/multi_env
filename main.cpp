@@ -240,7 +240,7 @@ void multi_env::work() {
 				esi_n.data.insert(esi_n.data.end(), env->get_state().count, env_task{ });
 			} else if (esi.head != verification_header::ok) {
 				std::cout << "got " << static_cast<int>(esi.head) << " header from "
-					<< uris_[i] << ". stopping other enviroments and nlab\n";
+					<< uris_[i] << ". stopping other environments and nlab\n";
 
 				for (auto& e : envs_) {
 					if (e->get_header() == verification_header::ok ||
@@ -334,13 +334,13 @@ int main(int argc, char** argv) {
 	std::string command;
 
 	app.add_option("-I,--envs-uri",	envs_uri,
-		"enviroments URI in format 'tcp://hostname:port'", true);
+		"environments URI in format 'tcp://hostname:port'", true);
 
 	app.add_option("-O,--nlab-uri",	nlab_uri,
 		"nlab URI in format 'tcp://hostname:port'", true);
 
 	app.add_flag("-e,--existing", existing,
-		"do not spawn enviroments, just connect to them");
+		"do not spawn environments, just connect to them");
 
 	app.add_option("count", count, "count of environments to start")
 		->check(CLI::Range(0, 1024))
